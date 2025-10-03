@@ -1,5 +1,5 @@
 /**********************************************************************************************************************
- * \file ASCLIN_UART.h
+ * \file DSADC.h
  * \copyright Copyright (C) Infineon Technologies AG 2019
  *
  * Use of this file is subject to the terms of use agreed between (i) you or the company in which ordinary course of
@@ -24,19 +24,18 @@
  * CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  *********************************************************************************************************************/
-#ifndef ASCLIN_UART_H_
-#define ASCLIN_UART_H_
+#ifndef DSADC_H_
+#define DSADC_H_
 
-extern volatile float g_uartDutyCycle;
-extern volatile uint32 g_uartFrequency; // 10 kHz default
+#include "Ifx_Types.h"   // Needed for float32, sint32, uint32 etc.
 
 /*********************************************************************************************************************/
 /*------------------------------------------------Function Prototypes------------------------------------------------*/
 /*********************************************************************************************************************/
-void init_ASCLIN_UART(void);                 /* Initialization function   */
-void send_receive_ASCLIN_UART_message(void); /* Send and receive function */
-void send_ASCLIN_UART_message(void);
-void send_receive_UART(uint8 *Locu8_Data,Ifx_SizeT Locu8_Size);
-void send_UART(const char *format, ...);
+void init_DSADC(void);
+void run_DSADC(void);
+float32 Get_DSADCbits(void);
+float32 Get_DSADCVoltage(void);
 
-#endif /* ASCLIN_UART_H_ */
+
+#endif /* DSADC_H_ */

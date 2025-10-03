@@ -34,11 +34,19 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "IfxPort.h"
+#include "IfxScuWdt.h"
+#include "stdlib.h"      // if you want atoi (but we'll avoid it in ISR)
+
+
+// In ASCLIN_UART.c (near g_uartDutyCycle)
+volatile float g_uartDutyCycle = 0.5f;
+volatile uint32 g_uartFrequency = 10000; // 10 kHz default
 
 /*********************************************************************************************************************/
 /*------------------------------------------------------Macros-------------------------------------------------------*/
 /*********************************************************************************************************************/
-#define UART_BAUDRATE           115200                                  /* UART baud rate in bit/s                  */
+#define UART_BAUDRATE           9600                                  /* UART baud rate in bit/s                  */
 
 #define UART_PIN_RX             IfxAsclin0_RXA_P14_1_IN                 /* UART receive port pin                    */
 #define UART_PIN_TX             IfxAsclin0_TX_P14_0_OUT                 /* UART transmit port pin                   */
@@ -67,6 +75,7 @@ uint8 g_rxData[SIZE] = {''};
 
 /* Size of the message */
 Ifx_SizeT g_count = sizeof(g_txData);
+Ifx_SizeT gr_count = 0;
 
 /*********************************************************************************************************************/
 /*---------------------------------------------Function Implementations----------------------------------------------*/
@@ -78,11 +87,71 @@ void asclin0TxISR(void)
     IfxAsclin_Asc_isrTransmit(&g_ascHandle);
 }
 
+//IFX_INTERRUPT(asclin0RxISR, 0, INTPRIO_ASCLIN0_RX);
+//void asclin0RxISR(void)
+//{
+//    IfxAsclin_Asc_isrReceive(&g_ascHandle);
+//}
+
 IFX_INTERRUPT(asclin0RxISR, 0, INTPRIO_ASCLIN0_RX);
 void asclin0RxISR(void)
 {
+    uint8 byte;
+    Ifx_SizeT size = 1;
+
+        IfxAsclin_Asc_read(&g_ascHandle, &byte, &size, 0);
+        char c = (char)byte;
+        //IfxAsclin_Asc_write(&g_ascHandle, &c, &size, 0); // Echo
+
+        static char cmdBuf[16];
+        static uint8 idx = 0;
+
+        if (c == '\r' || c == '\n') {
+            if (idx > 0) {
+                cmdBuf[idx] = '\0';
+
+                if (cmdBuf[0] == 'D') {
+                    int duty = 0;
+                    for (int i = 1; cmdBuf[i] >= '0' && cmdBuf[i] <= '9'; i++) {
+                        duty = duty * 10 + (cmdBuf[i] - '0');
+                    }
+                    if (duty >= 0 && duty <= 100) {
+                        g_uartDutyCycle = (float)duty / 100.0f;
+                    }
+                }
+                else if (cmdBuf[0] == 'F') {
+                    uint32 freq = 0;
+                    for (int i = 1; cmdBuf[i] >= '0' && cmdBuf[i] <= '9'; i++) {
+                        freq = freq * 10 + (cmdBuf[i] - '0');
+                    }
+                    if (freq >= 100 && freq <= 100000) {
+                        g_uartFrequency = freq;
+                    }
+                }
+                idx = 0;
+            }
+        } else if (idx < 15) {
+            cmdBuf[idx++] = c;
+        }
+
     IfxAsclin_Asc_isrReceive(&g_ascHandle);
 }
+
+//void asclin0RxISR(void)
+//{
+//
+//    Ifx_SizeT size = 1;
+//
+//    // Read one byte (non-blocking, timeout = 0)
+//    IfxAsclin_Asc_read(&g_ascHandle, &byte, &size, 0);
+//    c = (char)byte;
+//
+//    // Echo back immediately
+//    IfxAsclin_Asc_write(&g_ascHandle, &c, &size, TIME_INFINITE);
+//
+//    // Clear interrupt flag (required)
+//    IfxAsclin_Asc_isrReceive(&g_ascHandle);
+//}
 
 /* This function initializes the ASCLIN UART module */
 void init_ASCLIN_UART(void)
@@ -122,8 +191,19 @@ void init_ASCLIN_UART(void)
 /* This function sends and receives the string "Hello World!" */
 void send_receive_ASCLIN_UART_message(void)
 {
-    IfxAsclin_Asc_write(&g_ascHandle, g_txData, &g_count, TIME_INFINITE);   /* Transmit data via TX */
-    IfxAsclin_Asc_read(&g_ascHandle, g_rxData, &g_count, TIME_INFINITE);    /* Receive data via RX  */
+    if(gr_count != 0)
+    {
+        for (int i = 0; i < gr_count; i ++)
+        {
+            g_txData[i] = g_rxData[i];
+        }
+
+        IfxAsclin_Asc_write(&g_ascHandle, g_txData, &g_count, 0);   /* Transmit data via TX */
+    }
+
+
+
+    IfxAsclin_Asc_read(&g_ascHandle, g_rxData, &gr_count, 10);    /* Receive data via RX  */
 }
 
 void send_ASCLIN_UART_message(void)

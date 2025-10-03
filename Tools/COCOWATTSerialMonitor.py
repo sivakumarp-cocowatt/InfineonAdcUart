@@ -37,7 +37,7 @@ class SerialTerminalApp:
         self.running = False
         self.data_queue = queue.Queue()
         self.display_data = []
-        self._last_display_count = 0  # Track received messages
+        self._last_display_count = 0
         self.last_activity = time.time()
         self.auto_scroll = True
         self.buffer = ""
@@ -74,9 +74,12 @@ class SerialTerminalApp:
         self.default_parsers = ["ADC Volt:", "ADC Volt2:"]
         self.current_font = ("Consolas", 10)
         self.parser_colors = ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#FF5722', '#00BCD4', '#8BC34A', '#E91E63']
-        # Session log (will be opened conditionally)
+        # Session log
         self.session_log_file = None
         self.session_log_writer = None
+        self.tx_append_newline = True
+        self.graph_split_mode = False  # <<< NEW: Split mode flag
+
         self.create_widgets()
         self.processor_thread = threading.Thread(target=self.process_queue, daemon=True)
         self.processor_thread.start()
@@ -106,13 +109,11 @@ class SerialTerminalApp:
                                        bg=self.theme_colors[self.current_theme]["button_bg"], fg=self.theme_colors[self.current_theme]["button_fg"], 
                                        command=self.disconnect_serial, state="disabled", relief="raised", padx=5, pady=2)
         self.disconnect_btn.pack(side=tk.LEFT, padx=5)
-        
         self.import_csv_btn = tk.Button(status_frame, text="📥 Import CSV", font=("Segoe UI", 9, "bold"),
                                 bg=self.theme_colors[self.current_theme]["button_bg"],
                                 fg=self.theme_colors[self.current_theme]["button_fg"],
                                 command=self.import_csv_data, relief="raised", padx=5, pady=2)
         self.import_csv_btn.pack(side=tk.LEFT, padx=5)
-
         # Serial Configuration
         config_frame = tk.Frame(main_container, bg=self.theme_colors[self.current_theme]["bg"])
         config_frame.pack(fill="x", pady=(0, 10))
@@ -185,8 +186,24 @@ class SerialTerminalApp:
         cmd_frame = ttk.LabelFrame(left_frame, text="🚀 Quick Commands")
         cmd_frame.pack(fill="x", pady=(0, 10))
         for cmd in ["TEST", "AT", "PING", "HELLO"]:
-            btn = tk.Button(cmd_frame, text=cmd, font=("Segoe UI", 10, "bold"), bg=self.theme_colors[self.current_theme]["accent"], fg="white", relief="raised", padx=10, pady=5, command=lambda c=cmd: self.send_data(c))
+            btn = tk.Button(cmd_frame, text=cmd, font=("Segoe UI", 10, "bold"),
+                            bg=self.theme_colors[self.current_theme]["accent"], fg="white",
+                            relief="raised", padx=10, pady=5,
+                            command=lambda c=cmd: self.send_data(c))
             btn.pack(fill="x", pady=2)
+        ttk.Separator(cmd_frame, orient='horizontal').pack(fill='x', pady=5)
+        digits = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
+        digits_frame = ttk.Frame(cmd_frame)
+        digits_frame.pack(fill="x")
+        for i, digit in enumerate(digits):
+            if i % 3 == 0:
+                row_frame = ttk.Frame(digits_frame)
+                row_frame.pack(fill="x", pady=2)
+            btn = tk.Button(row_frame, text=digit, font=("Segoe UI", 10, "bold"),
+                            bg=self.theme_colors[self.current_theme]["accent"], fg="white",
+                            relief="raised", padx=8, pady=4,
+                            command=lambda d=digit: self.send_data(d))
+            btn.pack(side=tk.LEFT, expand=True, fill="x", padx=1)
         tools_frame = ttk.Frame(left_frame)
         tools_frame.pack(fill="x", pady=(10, 0))
         ttk.Button(tools_frame, text="Clear RX", command=self.clear_rx).pack(side=tk.LEFT, fill="x", expand=True, padx=(0, 5))
@@ -202,8 +219,7 @@ class SerialTerminalApp:
         self.tx_text = scrolledtext.ScrolledText(tx_frame, wrap=tk.WORD, font=("Consolas", 10, "bold"))
         self.tx_text.pack(fill="both", expand=True, padx=5, pady=5)
         self.tx_text.config(state="disabled")
-        # Store references for theme updates
-        self.output_text = self.rx_text  # Keep for backward compatibility
+        self.output_text = self.rx_text
 
     def build_parser_config_tab(self, parent):
         info_label = ttk.Label(parent, text="Add parser patterns (e.g., 'ADC Volt:', 'Temp:')")
@@ -274,29 +290,18 @@ class SerialTerminalApp:
             if not rows:
                 messagebox.showinfo("Info", "CSV is empty")
                 return
-
-            # Get parser patterns
             patterns = [e.get().strip() for e in self.parser_entries if e.get().strip()]
             if not patterns:
                 patterns = ["ADC Volt:", "ADC Volt2:"]
-
-            # Reset parser history
             self.parser_history = {p: deque(maxlen=self.max_history) for p in patterns}
             self.parser_values = {p: None for p in patterns}
-
-            # Clear current terminal and data
             self.display_data.clear()
             self.rx_text.config(state="normal")
             self.rx_text.delete(1.0, tk.END)
-            # (No need to clear TX since CSV has only RX)
-
             base_time = None
             for row in rows:
-                # Assume all rows are RECEIVED (no 'Direction' column)
                 data = row['Data']
                 ts_str = row['Timestamp']
-
-                # Parse timestamp for graph (numeric)
                 try:
                     if '.' in ts_str:
                         dt = datetime.strptime(ts_str, "%H:%M:%S.%f")
@@ -306,43 +311,29 @@ class SerialTerminalApp:
                     if base_time is None:
                         base_time = current_ts_numeric
                 except Exception:
-                    continue  # Skip invalid timestamps
-
-                # Add to display_data (used by graph parser and RX terminal)
+                    continue
                 entry = {'timestamp': ts_str, 'data': data}
                 self.display_data.append(entry)
-
-                # Parse for graph
                 parsed = self.parse_line_for_patterns(data, patterns)
                 for pat, val in parsed.items():
                     if isinstance(val, (int, float)) and not math.isnan(val):
                         if pat in self.parser_history:
                             self.parser_history[pat].append((current_ts_numeric, val))
-
-                # Show in RX terminal (same format as live data)
                 self.rx_text.insert(tk.END, f"{ts_str} ← {data}\n", "received")
-
-            # Finalize terminal state
             self.rx_text.config(state="disabled")
             self.rx_text.see(tk.END)
-
-            # Force graph update
             self.update_graph()
-
-            # Optional: Update parser output panel
             self.parsed_output.config(state="normal")
             self.parsed_output.delete(1.0, tk.END)
             for pattern in patterns:
                 val = self.parser_values.get(pattern, "—")
                 self.parsed_output.insert(tk.END, f"{pattern} {val}\n")
             self.parsed_output.config(state="disabled")
-
             messagebox.showinfo("Success", f"Imported {len(rows)} records")
         except Exception as e:
             messagebox.showerror("Import Error", str(e))    
-           
+
     def export_all_terminal_data(self):
-        """Export both RX and TX terminal content to a single CSV file."""
         filename = filedialog.asksaveasfilename(
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv")],
@@ -350,18 +341,13 @@ class SerialTerminalApp:
         )
         if not filename:
             return
-
         try:
             with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
                 writer = csv.writer(f)
                 writer.writerow(['Timestamp', 'Data', 'Direction'])
-
-                # Export RX (Received)
                 for entry in self.display_data:
                     clean = entry['data'].replace('\x00', '').replace('\r', '').replace('\n', ' ')
                     writer.writerow([entry['timestamp'], clean, 'Received'])
-
-                # Export TX (Sent) — parse from tx_text widget
                 tx_content = self.tx_text.get(1.0, tk.END).strip()
                 if tx_content:
                     for line in tx_content.split('\n'):
@@ -370,50 +356,32 @@ class SerialTerminalApp:
                             if len(parts) == 2:
                                 ts_part = parts[0].strip()
                                 cmd = parts[1].strip()
-                                # Validate timestamp format (optional)
                                 writer.writerow([ts_part, cmd, 'Sent'])
-
             messagebox.showinfo("Success", f"Full terminal data exported to:\n{filename}")
         except Exception as e:
             messagebox.showerror("Export Error", f"Failed to export:\n{str(e)}")
 
     def build_graph_tab(self, parent):
-        # Configure colors
         bg = self.theme_colors[self.current_theme]["graph_bg"]
         fg = self.theme_colors[self.current_theme]["graph_fg"]
-
-        # === TOP CONTROL BAR (Import, Export, etc.) ===
         control_frame = tk.Frame(parent, bg=bg)
         control_frame.pack(fill="x", padx=5, pady=(5, 5))
-
-        # Place "Import CSV" next to Connect/Disconnect? No — keep here for now, or move later.
         ttk.Button(control_frame, text="📥 Import CSV", command=self.import_csv_data).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(control_frame, text="📤 Export All Data", command=self.export_all_terminal_data).pack(side=tk.LEFT, padx=5)
         self.graph_auto_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(control_frame, text="Auto-update", variable=self.graph_auto_var).pack(side=tk.LEFT, padx=5)
+        # <<< NEW: SplitOptions Toggle >>>
+        self.graph_split_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(control_frame, text="SplitOptions", variable=self.graph_split_var, command=self.toggle_split_mode).pack(side=tk.LEFT, padx=5)
         ttk.Button(control_frame, text="🔄 Refresh", command=self.update_graph).pack(side=tk.RIGHT)
         ttk.Button(control_frame, text="💾 Export Graph", command=self.export_graph).pack(side=tk.RIGHT, padx=5)
 
-        # === GRAPH AREA WITH TOOLBAR AT TOP ===
         graph_frame = tk.Frame(parent, bg=bg)
         graph_frame.pack(fill="both", expand=True, padx=5, pady=0)
-
-        # Create figure and canvas
         self.figure = Figure(figsize=(10, 6), dpi=100, facecolor=bg)
-        self.ax = self.figure.add_subplot(111, facecolor=bg)
-        self.ax.set_title("Live Parsed Values", color=fg, fontsize=12)
-        self.ax.set_xlabel("Time (s)", color=fg, fontsize=10)
-        self.ax.set_ylabel("Value", color=fg, fontsize=10)
-        self.ax.grid(True, alpha=0.4, color=fg, linestyle='--')
-        self.ax.tick_params(colors=fg, labelsize=9)
-
         self.canvas = FigureCanvasTkAgg(self.figure, graph_frame)
-        
-        # Toolbar frame at the very top of graph area
         toolbar_frame = tk.Frame(graph_frame, bg=bg)
         toolbar_frame.pack(side=tk.TOP, fill="x", pady=2)
-
-        # Create and place toolbar inside toolbar_frame (centered horizontally)
         toolbar = NavigationToolbar2Tk(self.canvas, toolbar_frame)
         toolbar.config(bg=bg)
         toolbar._message_label.config(bg=bg, fg=fg)
@@ -423,12 +391,13 @@ class SerialTerminalApp:
             elif isinstance(child, tk.Label):
                 child.config(bg=bg, fg=fg)
         toolbar.update()
-        toolbar.pack(side=tk.TOP, anchor="center")  # Centered at top
-
-        # Now pack the canvas BELOW the toolbar
+        toolbar.pack(side=tk.TOP, anchor="center")
         self.canvas.get_tk_widget().pack(fill="both", expand=True, pady=(2, 0))
-    
-            
+
+    def toggle_split_mode(self):
+        self.graph_split_mode = self.graph_split_var.get()
+        self.update_graph()
+
     def build_settings_tab(self, parent):
         settings_frame = ttk.Frame(parent)
         settings_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -458,9 +427,16 @@ class SerialTerminalApp:
         self.auto_clear_var = tk.BooleanVar(value=self.auto_clear_on_connect)
         auto_clear_check = ttk.Checkbutton(settings_frame, text="Clear all data when connecting", variable=self.auto_clear_var)
         auto_clear_check.pack(anchor="w", pady=(0, 10))
-
-        # === SESSION LOGGING TOGGLE ===
-        self.session_log_var = tk.BooleanVar(value=True)  # Default ON
+        tx_newline_label = ttk.Label(settings_frame, text="📤 Append \\n to TX Data:")
+        tx_newline_label.pack(anchor="w", pady=(10, 0))
+        self.tx_newline_var = tk.BooleanVar(value=self.tx_append_newline)
+        tx_newline_check = ttk.Checkbutton(
+            settings_frame,
+            text="Add \\n after \\r when sending",
+            variable=self.tx_newline_var
+        )
+        tx_newline_check.pack(anchor="w", pady=(0, 10))
+        self.session_log_var = tk.BooleanVar(value=True)
         session_log_check = ttk.Checkbutton(
             settings_frame,
             text="Enable Session Logging (to CSV)",
@@ -468,7 +444,6 @@ class SerialTerminalApp:
             command=self.toggle_session_logging
         )
         session_log_check.pack(anchor="w", pady=(0, 10))
-
         ttk.Button(settings_frame, text="✅ Apply All Settings", command=self.apply_settings).pack(fill="x", pady=(20, 0))
 
     def toggle_session_logging(self):
@@ -498,6 +473,7 @@ class SerialTerminalApp:
         self.output_text.config(font=self.current_font)
         self.parsed_output.config(font=self.current_font)
         accent_color = self.accent_color_var.get()
+        self.tx_append_newline = self.tx_newline_var.get()
         if accent_color:
             self.theme_colors["light"]["accent"] = accent_color
             self.theme_colors["dark"]["accent"] = accent_color
@@ -520,16 +496,8 @@ class SerialTerminalApp:
         self.disconnect_btn.config(bg=colors["button_bg"], fg=colors["button_fg"])
         self.output_text.config(bg=colors["output_bg"], fg=colors["output_fg"], insertbackground=colors["output_fg"])
         self.parsed_output.config(bg=colors["output_bg"], fg=colors["output_fg"], insertbackground=colors["output_fg"])
-        if hasattr(self, 'ax'):
-            self.ax.set_facecolor(colors["graph_bg"])
-            self.ax.tick_params(colors=colors["graph_fg"])
-            self.ax.spines['bottom'].set_color(colors["graph_fg"])
-            self.ax.spines['top'].set_color(colors["graph_fg"])
-            self.ax.spines['left'].set_color(colors["graph_fg"])
-            self.ax.spines['right'].set_color(colors["graph_fg"])
-            self.ax.set_title("Live Parsed Values", color=colors["graph_fg"])
-            self.ax.set_xlabel("Time (s)", color=colors["graph_fg"])
-            self.ax.set_ylabel("Value", color=colors["graph_fg"])
+        if hasattr(self, 'figure'):
+            self.figure.set_facecolor(colors["graph_bg"])
             if hasattr(self, 'canvas'):
                 self.canvas.draw()
 
@@ -644,18 +612,17 @@ class SerialTerminalApp:
             text = self.send_entry.get().strip()
             if not text:
                 return
-        try:
+        if self.tx_append_newline:
             data_to_send = text + '\r\n'
+        else:
+            data_to_send = text + '\r'
+        try:
             encoded = data_to_send.encode('iso-8859-1')
             self.serial_conn.write(encoded)
             self.serial_conn.flush()
-
-            # Log sent data only if enabled
             if self.session_log_var.get() and self.session_log_writer:
                 timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
                 self.session_log_writer.writerow([timestamp, text, 'Sent'])
-
-            # Show in TX pane with colored timestamp
             timestamp = datetime.now().strftime("%H:%M:%S")
             self.tx_text.config(state="normal")
             self.tx_text.tag_config("tx_timestamp", foreground="#FF5722", font=("Consolas", 10, "bold"))
@@ -664,8 +631,6 @@ class SerialTerminalApp:
             self.tx_text.insert(tk.END, f"→ {text}\n", "tx_data")
             self.tx_text.see(tk.END)
             self.tx_text.config(state="disabled")
-
-            self.send_entry.delete(0, tk.END)
             if text and (not self.command_history or self.command_history[-1] != text):
                 self.command_history.append(text)
                 self.history_index = len(self.command_history)
@@ -707,11 +672,8 @@ class SerialTerminalApp:
             try:
                 entry = self.data_queue.get(timeout=0.1)
                 self.display_data.append(entry)
-
-                # Log received data only if enabled
                 if self.session_log_var.get() and self.session_log_writer:
                     self.session_log_writer.writerow([entry['timestamp'], entry['data'], 'Received'])
-
                 if len(self.display_data) > 500:
                     self.display_data = self.display_data[-500:]
                 self.update_display()
@@ -779,36 +741,72 @@ class SerialTerminalApp:
     def update_graph(self):
         bg = self.theme_colors[self.current_theme]["graph_bg"]
         fg = self.theme_colors[self.current_theme]["graph_fg"]
-        self.ax.clear()
-        self.ax.set_facecolor(bg)
-        self.ax.set_title("Live Parsed Values", color=fg, fontsize=12)
-        self.ax.set_xlabel("Time (s)", color=fg, fontsize=10)
-        self.ax.set_ylabel("Value", color=fg, fontsize=10)
-        self.ax.grid(True, alpha=0.4, color=fg, linestyle='--')
-        self.ax.tick_params(colors=fg, labelsize=9)
-        if not self.parser_history:
-            self.ax.text(0.5, 0.5, "No data to plot", transform=self.ax.transAxes, ha="center", color=fg, fontsize=12)
+        self.figure.clear()
+
+        patterns = list(self.parser_history.keys())
+        valid_patterns = [p for p in patterns if self.parser_history[p]]
+
+        if not valid_patterns:
+            ax = self.figure.add_subplot(111, facecolor=bg)
+            ax.text(0.5, 0.5, "No data to plot", transform=ax.transAxes, ha="center", color=fg, fontsize=12)
+            ax.set_facecolor(bg)
             self.figure.set_facecolor(bg)
             self.canvas.draw()
             return
+
         all_times = []
         for hist in self.parser_history.values():
             if hist:
                 all_times.extend([t for t, v in hist])
         if not all_times:
-            self.ax.text(0.5, 0.5, "No numeric data", transform=self.ax.transAxes, ha="center", color=fg, fontsize=12)
+            ax = self.figure.add_subplot(111, facecolor=bg)
+            ax.text(0.5, 0.5, "No numeric data", transform=ax.transAxes, ha="center", color=fg, fontsize=12)
             self.figure.set_facecolor(bg)
             self.canvas.draw()
             return
+
         t0 = min(all_times)
-        patterns = list(self.parser_history.keys())
-        for i, (pattern, hist) in enumerate(self.parser_history.items()):
-            if hist:
+
+        if self.graph_split_mode:
+            n = len(valid_patterns)
+            # FIXED: Removed facecolor from subplots()
+            axes = self.figure.subplots(n, 1, sharex=True)
+            if n == 1:
+                axes = [axes]
+            self.figure.set_facecolor(bg)
+            self.figure.subplots_adjust(hspace=0.3)
+
+            for i, pattern in enumerate(valid_patterns):
+                ax = axes[i]
+                ax.set_facecolor(bg)  # Set facecolor per axis
+                hist = self.parser_history[pattern]
                 times = [(t - t0) for t, v in hist]
                 values = [v for t, v in hist]
                 color = self.parser_colors[i % len(self.parser_colors)]
-                self.ax.plot(times, values, marker='o', linestyle='-', label=pattern, linewidth=2, color=color)
-        self.ax.legend(facecolor=bg, edgecolor=fg, fontsize=10, loc='upper right')
+                ax.plot(times, values, marker='o', linestyle='-', color=color, linewidth=1.5, label=pattern)
+                ax.set_ylabel(pattern.strip(': '), color=fg, fontsize=9)
+                ax.tick_params(colors=fg, labelsize=8)
+                ax.grid(True, alpha=0.3, color=fg, linestyle='--')
+                ax.legend(loc='upper right', facecolor=bg, edgecolor=fg, fontsize=8)
+
+            axes[-1].set_xlabel("Time (s)", color=fg, fontsize=10)
+
+        else:
+            ax = self.figure.add_subplot(111, facecolor=bg)
+            for i, pattern in enumerate(valid_patterns):
+                hist = self.parser_history[pattern]
+                times = [(t - t0) for t, v in hist]
+                values = [v for t, v in hist]
+                color = self.parser_colors[i % len(self.parser_colors)]
+                ax.plot(times, values, marker='o', linestyle='-', label=pattern, linewidth=2, color=color)
+
+            ax.set_title("Live Parsed Values", color=fg, fontsize=12)
+            ax.set_xlabel("Time (s)", color=fg, fontsize=10)
+            ax.set_ylabel("Value", color=fg, fontsize=10)
+            ax.grid(True, alpha=0.4, color=fg, linestyle='--')
+            ax.tick_params(colors=fg, labelsize=9)
+            ax.legend(facecolor=bg, edgecolor=fg, fontsize=10, loc='upper right')
+
         self.figure.set_facecolor(bg)
         self.canvas.draw()
 
@@ -864,7 +862,7 @@ class SerialTerminalApp:
             messagebox.showinfo("Success", f"Exported to:\n{filename}")
         except Exception as e:
             messagebox.showerror("Export Error", f"Failed to export:\n{str(e)}")
-    
+
     def export_graph(self):
         if not self.parser_history:
             messagebox.showinfo("Info", "No graph data to export")

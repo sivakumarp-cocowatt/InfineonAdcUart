@@ -1,5 +1,5 @@
 /**********************************************************************************************************************
- * \file ASCLIN_UART.h
+ * \file GTM_TOM_PWM.h
  * \copyright Copyright (C) Infineon Technologies AG 2019
  *
  * Use of this file is subject to the terms of use agreed between (i) you or the company in which ordinary course of
@@ -24,19 +24,23 @@
  * CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  *********************************************************************************************************************/
-#ifndef ASCLIN_UART_H_
-#define ASCLIN_UART_H_
+#include "Ifx_Types.h"  // ← ADD THIS LINE
 
-extern volatile float g_uartDutyCycle;
-extern volatile uint32 g_uartFrequency; // 10 kHz default
+#ifndef GTM_TOM_PWM_H_
+#define GTM_TOM_PWM_H_
+
+// Define pins globally (recommended)
+#define PWM1  0
+#define PWM2  1
 
 /*********************************************************************************************************************/
-/*------------------------------------------------Function Prototypes------------------------------------------------*/
+/*-----------------------------------------------Function Prototypes-------------------------------------------------*/
 /*********************************************************************************************************************/
-void init_ASCLIN_UART(void);                 /* Initialization function   */
-void send_receive_ASCLIN_UART_message(void); /* Send and receive function */
-void send_ASCLIN_UART_message(void);
-void send_receive_UART(uint8 *Locu8_Data,Ifx_SizeT Locu8_Size);
-void send_UART(const char *format, ...);
+void initGtmTomPwm(void);
+void fadeLED(void);
+void setDutyCycle(uint8 tmpIdx , uint32 dutyCycle);                                /* Function to set the duty cycle of the PWM    */
+void setFreqDutyCycle(uint8 tmpIdx, uint32 Freq,uint32 dutyCycle);
+void setDutyCycle1(uint32 dutyCycle);
+void setFreq(uint8 tmpIdx, uint32 Freq);
 
-#endif /* ASCLIN_UART_H_ */
+#endif /* GTM_TOM_PWM_H_ */

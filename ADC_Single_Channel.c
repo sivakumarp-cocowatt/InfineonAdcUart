@@ -39,8 +39,8 @@
 #define LIMIT_HIGH                  0xAAA                       /* Higher limit to be compared with the measurement */
 #define LIMIT_LOW                   0x555                       /* Lower limit to be compared with the measurement  */
 #define VADC_GROUP                  IfxVadc_GroupId_0           /* Use the ADC group 0                              */
-#define CHANNEL_ID                  0                           /* Use the Channel 0                                */
-#define CHANNEL_RESULT_REGISTER     5                           /* Use the Result Register 5                        */
+#define CHANNEL_ID                  7                           /* Use the Channel 0                                */
+#define CHANNEL_RESULT_REGISTER     7                           /* Use the Result Register 5                        */
 
 /*********************************************************************************************************************/
 /*-------------------------------------------------Global variables--------------------------------------------------*/

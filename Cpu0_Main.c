@@ -44,12 +44,12 @@
 #include "IfxScuWdt.h"
 #include "ADC_Single_Channel.h"
 #include "ASCLIN_UART.h"
+#include "GTM_TOM_PWM.h"
 #include "Bsp.h"
+#include "IfxVADC_Adc.h"
+#include "IfxDSADC.h"
+#include "DSADC.h"
 
-/*********************************************************************************************************************/
-/*------------------------------------------------------Macros-------------------------------------------------------*/
-/*********************************************************************************************************************/
-#define WAIT_TIME   100             /* Number of milliseconds to wait between each conversion                       */
 /*********************************************************************************************************************/
 /*------------------------------------------------------Macros-------------------------------------------------------*/
 /*********************************************************************************************************************/
@@ -59,7 +59,7 @@ IfxCpu_syncEvent g_cpuSyncEvent = 0;
 unsigned int RESULTReg = 0u;
 
 #define ADC_RESOLUTION 4096   // 12-bit -> 2^12 = 4096 steps
-#define VREF_MV 5000          // Max voltage reference in millivolts (5000mV = 5.0V)
+#define VREF_MV 3300          // Max voltage reference in millivolts (5000mV = 5.0V)
 
 /*********************************************************************************************************************/
 /*-------------------------------------------- Utility Functions ----------------------------------------------------*/
@@ -72,6 +72,44 @@ unsigned int adcToMilliVolt(unsigned int adcValue) {
     }
     return (adcValue * VREF_MV) / (ADC_RESOLUTION - 1);
 }
+
+void UARTgetPeriodDuty(void)
+{
+    // Update duty if changed
+      static float lastDuty = -1.0f;
+      if (g_uartDutyCycle != lastDuty) {
+          lastDuty = g_uartDutyCycle;
+
+          //send_UART("Duty: %.0f%%\n\r", g_uartDutyCycle * 100.0f);
+
+          setDutyCycle(PWM1,g_uartDutyCycle*100.0f);
+          setDutyCycle(PWM2,g_uartDutyCycle*100.0f);
+
+      }
+
+      // Update frequency if changed
+      static uint32 lastFreq = 0;
+      if (g_uartFrequency != lastFreq) {
+
+          if(g_uartFrequency<3000)
+          {
+               //send_UART("Set Freq :>= 3000 Hz\n\r");
+          }
+          else
+          if(g_uartFrequency>30000)
+          {
+              //send_UART("Set Freq :<= 30000 Hz\n\r");
+          }
+          else
+          {
+              //send_UART("Freq: %u Hz\n\r", g_uartFrequency);
+          }
+
+          setFreq(PWM1,g_uartFrequency);
+          setFreq(PWM2,g_uartFrequency);
+          lastFreq = g_uartFrequency;
+      }
+  }
 
 
 /*********************************************************************************************************************/
@@ -96,6 +134,9 @@ int core0_main(void)
     IfxCpu_enableInterrupts();          /* Enable interrupts after initialization */
     send_ASCLIN_UART_message();         /* Initial hello string from Infineon example */
 
+    /* Initialize GTM TOM module */
+     initGtmTomPwm();
+
     /* Initialize LEDs */
     initializeLEDs();
 
@@ -105,8 +146,21 @@ int core0_main(void)
     /* Start the background scan */
     vadcBackgroundScanRun();
 
+    /* Initialize the DSADC module      */
+    init_DSADC();
+
     while(1)
     {
+
+        UARTgetPeriodDuty();
+
+        // Sweep duty
+        g_uartDutyCycle += 0.005f;
+
+        if (g_uartDutyCycle > 1.0f) g_uartDutyCycle = 0.005f;
+        setDutyCycle(PWM1,g_uartDutyCycle*100.0f);
+
+        //send_receive_ASCLIN_UART_message();
         /* Update LEDs depending on the measured value */
         RESULTReg = indicateConversionValue();
 
@@ -115,13 +169,21 @@ int core0_main(void)
 
         /* Send formatted results via UART */
         // Print the raw ADC register value (in bits, 0–4095 for 12-bit ADC)
-        send_UART("ADC Bits: %u ", RESULTReg);
+        send_UART("VADCBits: %u ", RESULTReg);
 
         // Print the converted voltage in millivolts (integer value, 0–5000 mV)
-        send_UART("ADC mVolt: %u mV ", mv);
+        send_UART("VADCmVolt: %u mV ", mv);
 
-        // Print the converted voltage in volts with 3 decimal places (e.g., 2.345 V)
-        send_UART("ADC Volt: %.3f V\n\r", mv / 1000.0f);
+        float32 dsAdcbits = (float32)Get_DSADCbits(); /* Run the conversion continuously and send the bits  */
+
+        float32 dsmv      = (float32)Get_DSADCVoltage();      /* Run the conversion continuously and send the Volts  */
+
+        /* Send formatted results via UART */
+        // Print the raw ADC register value (in bits, 0–4095 for 12-bit ADC)
+        send_UART("DSADCBits: %.2f ", dsAdcbits);
+
+        // Print the converted voltage in millivolts (integer value, 0–5000 mV)
+        send_UART("DSADCmVolt: %.2f mV \n\r ", dsmv*1000);
 
         wait(ticksFor100ms);
     }
