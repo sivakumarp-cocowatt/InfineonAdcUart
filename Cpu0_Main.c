@@ -169,6 +169,10 @@ int core0_main(void)
 
         /* Send formatted results via UART */
         // Print the raw ADC register value (in bits, 0–4095 for 12-bit ADC)
+        send_UART("Input PWM Freq :  %u Khz ", g_uartFrequency/1000);
+
+        send_UART("DutyCycle : %u ", (uint16)(g_uartDutyCycle*100));
+
         send_UART("VADCBits: %u ", RESULTReg);
 
         // Print the converted voltage in millivolts (integer value, 0–5000 mV)
@@ -180,7 +184,7 @@ int core0_main(void)
 
         /* Send formatted results via UART */
         // Print the raw ADC register value (in bits, 0–4095 for 12-bit ADC)
-        send_UART("DSADCBits: %.2f ", dsAdcbits);
+        //send_UART("DSADCBits: %.2f ", dsAdcbits);
 
         // Print the converted voltage in millivolts (integer value, 0–5000 mV)
         send_UART("DSADCmVolt: %.2f mV \n\r ", dsmv*1000);
