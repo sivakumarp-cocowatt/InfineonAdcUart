@@ -182,10 +182,6 @@ int core0_main(void)
 
         float32 dsmv      = (float32)Get_DSADCVoltage();      /* Run the conversion continuously and send the Volts  */
 
-        /* Send formatted results via UART */
-        // Print the raw ADC register value (in bits, 0–4095 for 12-bit ADC)
-        //send_UART("DSADCBits: %.2f ", dsAdcbits);
-
         // Print the converted voltage in millivolts (integer value, 0–5000 mV)
         send_UART("DSADCmVolt: %.2f mV \n\r ", dsmv*1000);
 
